@@ -1,16 +1,15 @@
 import datetime
 import math
 import os
-
 import wget
 import requests
 import re
 import logging
 import threading
-import yaml
 from log import logger
 from ffmpeg_tool import merge_multiple_ts
 from common import delete_target_files,config
+import collections
 
 vod_config = config['vod']
 fragmentation_divide = vod_config['fragmentation-divide']
@@ -37,29 +36,16 @@ base_path = os.getcwd()
 fail_vod_nums = list()
 modes = {"1": "下载vod视频", "2": "手动合并视频分片"}
 
-# fragmentation_divide = 3
-# timeline_offset_second = 30
-# dir_format = "%Y-%m-%d_%title"
-# threads_count = 10
-# auto_merge = False
-# auto_del_tmp = True
-# del_fragmentation_after_merge = False
-# merge_postfix = "ts"
-# fail_retry_time = 1
-# proxy_enable = True
-# proxy_protocol = "https"
-# proxy_url = "127.0.0.1:10809"
-
 class Vod:
-    def __init__(self, title:str, date:datetime.datetime, link:str, duration:int, host:str):
+    def __init__(self, title:str, date:datetime.datetime, files:dict, duration:int, host:str):
         self.title = title
         self.date = date
-        self.link = link
+        self.files = files
         self.duration = duration
         self.host = host
 
     def __str__(self):
-        return f"Vod(title={self.title}, date={self.date}, link={self.link}, duration={self.duration})"
+        return f"Vod(title={self.title}, date={self.date}, link={self.files}, duration={self.duration})"
 
 def format_time(format:str, date:datetime.datetime):
     return date.strftime(format.encode('unicode-escape').decode()).encode().decode('unicode-escape')
@@ -104,12 +90,20 @@ def get_target_fragmentations(duration_timeline:str, duration_second:int):
     after = get_time_seconds(after) + timeline_offset_second
     before = 0 if before < 0 else before
     after = duration_second if after > duration_second else after
-    return math.ceil(before/3),math.ceil(after/3)
-
+    return math.ceil(before/fragmentation_divide),math.ceil(after/fragmentation_divide)
 def get_fragmentation_num(duration:int):
     return math.ceil(duration/1000/fragmentation_divide)
 
-def get_vod_fragmentation_url(num:int, vod_link:str):
+def get_vod_fragmentation_url(num:int, files:dict):
+    order = num * fragmentation_divide * 1000
+    vod_link = ""
+    for key in files.keys():
+        if order > key:
+            order = order - key
+        else:
+            vod_link = files[key]
+            break
+    num = math.floor(order/1000/fragmentation_divide)
     url = vod_link[0:vod_link.find('video')] + "hls/vod" + vod_link[(vod_link.find('smil:vod')+8):(vod_link.find('playlist'))] + f"original/both/seg-{num}.ts"
     return url
 
@@ -131,25 +125,22 @@ def get_vod_info(vod_id:str):
     if not proxy_enable:
         proxies = None
     response = requests.post(url=url, proxies=proxies, headers=headers, data=payload)
+    logger.info(f"Response: {response.json()}")
     vod_info = response.json().get('data')
     # vod日期
     date = datetime.datetime.strptime(vod_info.get('broad_start'), default_date_format)
     # vod标题
     title = vod_info.get('full_title')
-    file_info = vod_info.get('files')[0]
-    # vod链接
-    vod_link = file_info.get('file')
+    file_map = collections.OrderedDict()
+    for file in vod_info.get('files'):
+        file_map[file.get('duration')] = file.get('file')
     # vod时长(毫秒)
-    vod_duration = int(file_info.get('duration'))
+    vod_duration = int(vod_info.get('total_file_duration'))
     # vod主播昵称
     vod_host = vod_info.get('writer_nick')
-    return Vod(title=title, date=date, link=vod_link, duration=vod_duration, host=vod_host)
+    return Vod(title=title, date=date, files=file_map, duration=vod_duration, host=vod_host)
 
 def multithreading_download_vods(vod_nums:list, vod_info:Vod):
-    dir_name = parse_dir_pattern(title=vod_info.title, date=vod_info.date, host=vod_info.host)
-    if not os.path.exists(dir_name):
-        os.mkdir(dir_name)
-    os.chdir(dir_name)
     # 将数组拆分成成差不多相等的块
     chunk_size = len(vod_nums) // threads_count
     if chunk_size <= 0:
@@ -159,22 +150,22 @@ def multithreading_download_vods(vod_nums:list, vod_info:Vod):
     threads = []
     # 为每个资源文件块下载创建一个线程程
     for i in range(len(chunks)):
-        t = threading.Thread(target=download_vods, args=(chunks[i],vod_info.link))
+        t = threading.Thread(target=download_vods, args=(chunks[i],vod_info.files))
         threads.append(t)
         t.start()
     # 等待所有线程完成
     for t in threads:
         t.join()
 
-def download_vods(nums:list, url:str):
+def download_vods(nums:list, files:dict):
     for num in nums:
-        vod_url = get_vod_fragmentation_url(num=num, vod_link=url)
+        vod_url = get_vod_fragmentation_url(num=num, files=files)
         filename = f"seg-{num}.ts"
         if not os.path.exists(os.getcwd() + os.sep + filename):
             try:
-                logger.info(f"正在下载资源:{vod_url}")
-                wget.download(url=vod_url)
-                logger.info(f"成功下载资源:{vod_url}到{os.getcwd()}")
+                logger.info(f"正在下载资源:{vod_url}:{filename}")
+                wget.download(url=vod_url, out=filename)
+                logger.info(f"成功下载资源:{vod_url}到{os.getcwd()}:{filename}")
             except Exception as e:
                 logging.exception("An exception occurred: %s", str(e))
                 logger.error(f"下载以下资源失败:{vod_url}，将其加入下载失败队列")
@@ -184,23 +175,28 @@ def download_vods(nums:list, url:str):
 
 def handle_vod_fragmentation_download():
     vod_id = input("请输入VOD的ID: ")
-    base_path = validate_path(input("请输入文件存放的目录(直接回车使用当前脚本所在的目录): "))
-    os.chdir(base_path)
     duration_timeline = validate_timeline(input("请输入需要截取的时间片段(格式%H:%M:%S-%H:%M:%S):"))
     vod_info = get_vod_info(vod_id)
+    dir_name = parse_dir_pattern(title=vod_info.title, date=vod_info.date, host=vod_info.host)
+    if not os.path.exists(dir_name):
+        os.mkdir(dir_name)
+    os.chdir(dir_name)
+    logger.info(f"Vod信息: {str(vod_info)}")
     before, after = get_target_fragmentations(duration_timeline=duration_timeline,
-                                              duration_second=math.ceil(vod_info.duration / 1000))
+                                              duration_second=math.ceil(vod_info.duration/1000))
     logger.info(f"共计{after - before + 1}个ts分片文件将被下载！")
     vod_nums = [num for num in range(before, after + 1)]
     multithreading_download_vods(vod_nums=vod_nums, vod_info=vod_info)
-    for i in range(0, fail_retry_time):
+    for i in range(1, fail_retry_time+1):
         if len(fail_vod_nums) > 0:
             retry_vod_nums = fail_vod_nums
             fail_vod_nums.clear()
-            logger.warning(f"尝试重新下载之前下载失败的资源: {len(retry_vod_nums)}")
+            logger.warning(f"第{i}次尝试重新下载之前下载失败的资源: {len(retry_vod_nums)}")
             multithreading_download_vods(vod_nums=retry_vod_nums, vod_info=vod_info)
+        else:
+            break
     if auto_del_tmp:
-        logger.warning("开始删除ts下载产生的临时文件")
+        logger.warning(f"开始删除{os.getcwd()}目录下下载产生的临时文件")
         delete_target_files(dir_path=os.getcwd(), pattern=re.compile(r'.*\.tmp$'), logger=logger)
     if auto_merge:
         logger.info(f"开始自动合并个{after-before+1}ts分片文件")
@@ -208,10 +204,11 @@ def handle_vod_fragmentation_download():
 
 if __name__ == '__main__':
     mode = int(validate_mode(input(f"请选择需要执行的任务编号({' '.join([key+':'+value for key,value in modes.items()])}): ")))
+    base_path = validate_path(input("请输入文件存放的目录(直接回车选择当前脚本所在的目录): "))
+    os.chdir(base_path)
     if mode == 1:
         handle_vod_fragmentation_download()
     elif mode == 2:
         start,end = validate_fragmentation_range(input(f"请输入分片起始数和分片终止数并以-分隔(例如: 100-200):")).split("-")
-        path = validate_path(input("请输入视频分片文件存放的目录: "))
-        merge_multiple_ts(start=int(start), end=int(end), ts_path=path, postfix=merge_postfix, del_ts_after_merge=del_fragmentation_after_merge)
+        merge_multiple_ts(start=int(start), end=int(end), ts_path=base_path, postfix=merge_postfix, del_ts_after_merge=del_fragmentation_after_merge)
 

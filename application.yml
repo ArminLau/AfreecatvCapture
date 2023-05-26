@@ -29,7 +29,7 @@ download:
   #合并视频分片成功后是否自动删除视频分片
   del-fragmentation-after-merge: false
   #视频分片下载的重试次数
-  fail-retry-time: 1
+  fail-retry-time: 5
 ffmpeg:
   #ffmpeg合并视频的格式，目前应该只支持ts或者mp4
   merge-postfix: ts
