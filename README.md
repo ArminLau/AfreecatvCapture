@@ -1,4 +1,10 @@
 ### 一个用于截取afreecatv视频片段的脚本工具
+
+#### 目前支持的功能
+* 根据配置的截取时间段下载视频对应的ts分片
+* 使用ffmpeg将ts分片合并成一个视频
+* 后续应该不会怎么加新功能了，主要作为简单使用(懒)，如果有bug欢迎提出
+
 #### 使用条件
 * Python版本3.8版本及以上
 * 获取afreecatv的vod_id，获取来源: https://vod.afreecatv.com/player/{vod_id}
