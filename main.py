@@ -10,45 +10,45 @@ import threading
 import yaml
 from log import logger
 from ffmpeg_tool import merge_multiple_ts
+from common import delete_target_files,config
 
+vod_config = config['vod']
+fragmentation_divide = vod_config['fragmentation-divide']
+timeline_offset_second = vod_config['timeline-offset-second']
+dir_format = vod_config['folder-format']
+
+download_config = config['download']
+fail_retry_time = download_config['fail-retry-time']
+threads_count = download_config['threads']
+auto_merge = download_config['auto-merge']
+auto_del_tmp = download_config['auto-del-tmp']
+del_fragmentation_after_merge = download_config['del-fragmentation-after-merge']
+
+ffmpeg_config = config['ffmpeg']
+merge_postfix = ffmpeg_config['merge-postfix']
+
+proxy_config = config['proxy']
+proxy_enable = proxy_config['enable']
+proxy_protocol = proxy_config['protocol']
+proxy_url = proxy_config['url']
 
 default_date_format = "%Y-%m-%d %H:%M:%S"
 base_path = os.getcwd()
 fail_vod_nums = list()
-fragmentation_divide = 3
-timeline_offset_second = 30
-dir_format = "%Y-%m-%d_%title"
-threads_count = 10
-auto_merge = False
-auto_del_tmp = True
-del_fragmentation_after_merge = False
-merge_postfix = "ts"
-fail_retry_time = 1
-proxy_enable = True
-proxy_protocol = "https"
-proxy_url = "127.0.0.1:10809"
 modes = {"1": "下载vod视频", "2": "手动合并视频分片"}
 
-def parse_config():
-    config_file = "application.yml"
-    with open(config_file, 'r', encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-        print(f"读取配置文件: {config_file}, 配置为:\n{config}")
-
-    vod_config = config['vod']
-    fragmentation_divide = vod_config['fragmentation-divide']
-    timeline_offset_second = vod_config['timeline-offset-second']
-    dir_format = vod_config['folder-format']
-
-    download_config = config['download']
-    fail_retry_time = download_config['fail-retry-time']
-    threads_count = download_config['threads']
-    auto_merge = download_config['auto-merge']
-    auto_del_tmp = download_config['auto-del-tmp']
-    del_fragmentation_after_merge = download_config['del-fragmentation-after-merge']
-
-    ffmpeg_config = config['ffmpeg']
-    merge_postfix = ffmpeg_config['merge-postfix']
+# fragmentation_divide = 3
+# timeline_offset_second = 30
+# dir_format = "%Y-%m-%d_%title"
+# threads_count = 10
+# auto_merge = False
+# auto_del_tmp = True
+# del_fragmentation_after_merge = False
+# merge_postfix = "ts"
+# fail_retry_time = 1
+# proxy_enable = True
+# proxy_protocol = "https"
+# proxy_url = "127.0.0.1:10809"
 
 class Vod:
     def __init__(self, title:str, date:datetime.datetime, link:str, duration:int, host:str):
@@ -166,20 +166,6 @@ def multithreading_download_vods(vod_nums:list, vod_info:Vod):
     for t in threads:
         t.join()
 
-def delete_target_files(dir_path, pattern:re.Pattern):
-    if not os.path.exists(dir_path):
-        logger.error(f"指定的目录:{dir_path}不存在！")
-        return
-    count = 0
-    for root, dirs, files in os.walk(dir_path):
-        for file in files:
-            if pattern.match(file):
-                file_path = os.path.join(root, file)
-                logger.warning(f"删除目标文件: {file_path}")
-                os.remove(file_path)
-                count = count + 1
-    logger.warning(f"总共有{count}个目标文件被删除！")
-
 def download_vods(nums:list, url:str):
     for num in nums:
         vod_url = get_vod_fragmentation_url(num=num, vod_link=url)
@@ -215,21 +201,17 @@ def handle_vod_fragmentation_download():
             multithreading_download_vods(vod_nums=retry_vod_nums, vod_info=vod_info)
     if auto_del_tmp:
         logger.warning("开始删除ts下载产生的临时文件")
-        delete_target_files(dir_path=os.getcwd(), pattern=re.compile(r'.*\.tmp$'))
+        delete_target_files(dir_path=os.getcwd(), pattern=re.compile(r'.*\.tmp$'), logger=logger)
     if auto_merge:
         logger.info(f"开始自动合并个{after-before+1}ts分片文件")
-        merge_multiple_ts(start=before, end=after, ts_path=os.getcwd(), postfix=merge_postfix)
-    if auto_merge and del_fragmentation_after_merge:
-        logger.warning(f"开始删除{os.getcwd()}下的所有ts分片文件")
-        delete_target_files(dir_path=os.getcwd(), pattern=re.compile(r'/seg-\d+\.ts/'))
+        merge_multiple_ts(start=before, end=after, ts_path=os.getcwd(), postfix=merge_postfix, del_ts_after_merge=del_fragmentation_after_merge)
 
 if __name__ == '__main__':
-    parse_config()
     mode = int(validate_mode(input(f"请选择需要执行的任务编号({' '.join([key+':'+value for key,value in modes.items()])}): ")))
     if mode == 1:
         handle_vod_fragmentation_download()
     elif mode == 2:
         start,end = validate_fragmentation_range(input(f"请输入分片起始数和分片终止数并以-分隔(例如: 100-200):")).split("-")
         path = validate_path(input("请输入视频分片文件存放的目录: "))
-        merge_multiple_ts(start=start, end=end, ts_path=path, postfix=merge_postfix)
+        merge_multiple_ts(start=int(start), end=int(end), ts_path=path, postfix=merge_postfix, del_ts_after_merge=del_fragmentation_after_merge)
 

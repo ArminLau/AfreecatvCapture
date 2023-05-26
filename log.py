@@ -1,6 +1,7 @@
 import datetime
 import logging
 import yaml
+from common import config
 
 log_level = {
     "debug": logging.DEBUG,
@@ -10,8 +11,6 @@ log_level = {
     "critical": logging.CRITICAL
 }
 
-with open("application.yml", 'r', encoding="utf-8") as f:
-    config = yaml.safe_load(f)
 log_config = config['logger']
 level = log_config['level']
 log_name = log_config['name']

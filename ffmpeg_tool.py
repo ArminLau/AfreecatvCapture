@@ -3,13 +3,17 @@ import subprocess
 import sys
 import log
 from log import logger
+from common import delete_target_files
+import re
 
-def merge_multiple_ts(start:int, end:int, ts_path:str, postfix="ts"):
+def merge_multiple_ts(start:int, end:int, ts_path:str, postfix="ts", del_ts_after_merge=False):
     os.chdir(ts_path)
     files = list()
     output_file = f"{os.path.basename(os.getcwd())}_{start}-{end}.{postfix}"
+    del_files = list()
     for i in range(start, end+1):
         filename = f"seg-{i}.ts"
+        del_files.append(filename)
         if not os.path.exists(os.getcwd() + os.sep + filename):
             log_info = f"缺失vod分片:seg-{i}.ts, 转换失败!"
             logger.exception(log_info)
@@ -23,6 +27,9 @@ def merge_multiple_ts(start:int, end:int, ts_path:str, postfix="ts"):
     p = subprocess.Popen(command, stdout=sys.stdout, stderr=sys.stdout)
     # 等待进程结束
     p.wait()
+    if del_ts_after_merge:
+        logger.warning(f"开始删除{os.getcwd()}下的所有ts分片文件")
+        delete_target_files(dir_path=os.getcwd(), filter=del_files, logger=logger)
 
 def convert_ts_to_mp4(start:int, end:int, ts_path:str, crf=18, audio_bitrate=256):
     os.chdir(ts_path)
