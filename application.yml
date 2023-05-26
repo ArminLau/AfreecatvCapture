@@ -1,0 +1,35 @@
+logger:
+  #日志等級
+  level: debug
+  #日志名称
+  name: "afreecatv-capture_%Y-%m-%d_%H-%M-%S.log"
+  #日志样式
+  format: '%(asctime)s - %(name)s  - %(threadName)s - %(levelname)s - %(module)s - %(lineno)d: %(message)s'
+proxy:
+  #是否使用代理
+  enable: true
+  #代理协议
+  protocol: https
+  #代理url+端口
+  url: 127.0.0.1:10809
+vod:
+  #用于根据视频的时长计算视频分片数量,目前分片数量的计算公式为: 视频时长(秒)/fragmentation-divide
+  fragmentation-divide: 3
+  #视频截取的偏移，比如配置了截取的时间段为00:23:00-00:32:00,那么实际截取的时间段为00:22:30-00:32:30(按timeline-offset-second为30计算)
+  timeline-offset-second: 30
+  #默认会给每个vod视频创建目录，目录样式支持的变量为: %Y(年) %m(月) %d(日) %H(小时（24小时制）) %I(小时（12小时制）) %M(分) %S(秒) %title(视频标题) %host(主播昵称)
+  folder-format: "%Y-%m-%d_%title"
+download:
+  #下载视频分片的线程数，不是越高越好，根据实际的网络情况调整，如果下载多次失败，可适当降低，否则反之
+  threads: 10
+  #是否下载视频分片后直接通过ffmpeg合并成一个视频(如果视频分片不完整会无法合并，抛出异常终止进程)
+  auto-merge: true
+  #是否自动删除下载视频分片过程中产生的tmp临时文件
+  auto-del-tmp: true
+  #合并视频分片成功后是否自动删除视频分片
+  del-fragmentation-after-merge: false
+  #视频分片下载的重试次数
+  fail-retry-time: 1
+ffmpeg:
+  #ffmpeg合并视频的格式，目前应该只支持ts或者mp4
+  merge-postfix: ts
